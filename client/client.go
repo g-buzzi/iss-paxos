@@ -6,6 +6,7 @@ import (
 
 	"github.com/ailidani/paxi"
 	"github.com/ailidani/paxi/chain"
+	"github.com/ailidani/paxi/iss2"
 	"github.com/ailidani/paxi/paxos"
 )
 
@@ -58,6 +59,8 @@ func main() {
 		d.Client = paxos.NewClient(paxi.ID(*id))
 	case "chain":
 		d.Client = chain.NewClient()
+	case "iss":
+		d.Client = iss2.NewClient(paxi.ID(*id))
 	default:
 		d.Client = paxi.NewHTTPClient(paxi.ID(*id))
 	}

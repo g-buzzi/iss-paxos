@@ -11,6 +11,7 @@ import (
 	"github.com/ailidani/paxi/dynamo"
 	"github.com/ailidani/paxi/epaxos"
 	"github.com/ailidani/paxi/hpaxos"
+	"github.com/ailidani/paxi/iss2"
 	"github.com/ailidani/paxi/kpaxos"
 	"github.com/ailidani/paxi/log"
 	"github.com/ailidani/paxi/m2paxos"
@@ -79,6 +80,8 @@ func replica(id paxi.ID) {
 	case "hpaxos":
 		hpaxos.NewReplica(id).Run()
 
+	case "iss":
+		iss2.NewReplica(id).Run()
 	default:
 		panic("Unknown algorithm")
 	}

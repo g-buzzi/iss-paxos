@@ -118,9 +118,11 @@ func (t *transport) Dial() error {
 	return nil
 }
 
-/******************************
+/*
+*****************************
 /*     TCP communication      *
-/******************************/
+/*****************************
+*/
 type tcp struct {
 	*transport
 }
@@ -154,7 +156,7 @@ func (t *tcp) Listen() {
 						var m interface{}
 						err := decoder.Decode(&m)
 						if err != nil {
-							log.Error(err)
+							//log.Error(err)
 							continue
 						}
 						t.recv <- m
@@ -166,9 +168,11 @@ func (t *tcp) Listen() {
 	}(listener)
 }
 
-/******************************
+/*
+*****************************
 /*     UDP communication      *
-/******************************/
+/*****************************
+*/
 type udp struct {
 	*transport
 }

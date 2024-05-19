@@ -18,8 +18,8 @@
     "buffer_size": 1024,
     "multiversion": false,
     "benchmark": {
-        "T": 0,
-        "N": 100,
+        "T": 60,
+        "N": 0,
         "K": 1000,
         "W": 0.5,
         "Throttle": 1000,

@@ -123,13 +123,14 @@ func (s *socket) Recv() interface{} {
 	for {
 		m := t.Recv()
 		if !s.crash {
+			log.Debugf("node %s received message %+v", s.id, m)
 			return m
 		}
 	}
 }
 
 func (s *socket) MulticastZone(zone int, m interface{}) {
-	//log.Debugf("node %s broadcasting message %+v in zone %d", s.id, m, zone)
+	log.Debugf("node %s broadcasting message %+v in zone %d", s.id, m, zone)
 	for id := range s.addresses {
 		if id == s.id {
 			continue
@@ -141,7 +142,7 @@ func (s *socket) MulticastZone(zone int, m interface{}) {
 }
 
 func (s *socket) MulticastQuorum(quorum int, m interface{}) {
-	//log.Debugf("node %s multicasting message %+v for %d nodes", s.id, m, quorum)
+	log.Debugf("node %s multicasting message %+v for %d nodes", s.id, m, quorum)
 	i := 0
 	for id := range s.addresses {
 		if id == s.id {
@@ -156,7 +157,7 @@ func (s *socket) MulticastQuorum(quorum int, m interface{}) {
 }
 
 func (s *socket) Broadcast(m interface{}) {
-	//log.Debugf("node %s broadcasting message %+v", s.id, m)
+	log.Debugf("node %s broadcasting message %+v", s.id, m)
 	for id := range s.addresses {
 		if id == s.id {
 			continue
