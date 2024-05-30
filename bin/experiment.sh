@@ -5,7 +5,7 @@ go build ../cmd/
 ip=`hostname -I | xargs`
 echo $ip
 
-if [[$ip =~ (10\.10\.1\.[0-9]*)]]; then
+if [[ $ip =~ (10\.10\.1\.[0-9]*) ]]; then
     ip=${BASH_REMATCH[1]}
     config=`cat ./config.json`
     server_regex="(\"([0-9\.]*)\":\s*\"tcp://${ip}[^\"]*\").*$"
