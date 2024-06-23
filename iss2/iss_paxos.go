@@ -225,10 +225,13 @@ func (p *ISSPaxos) HandleP1b(m P1b) {
 			log.Debugf("Got Quorum")
 			p.active = true
 			for s := 0; s <= p.slot; s++ {
+				log.Debugf("Seeing if has to resend slot %v of segment %v, with slot=%v", s, p.segment, p.log[s])
 				if p.log[s] == nil || p.log[s].commit || s >= segmentSize {
+					log.Debugf("Not resending slot %v of segment %v", s, p.segment)
 					//log.Debugf("Skipping log for %v after steal of segment %v in epoch %v", s, p.segment, p.epoch)
 					continue
 				}
+				log.Debugf("Decided to resend slot %v of segment %v", s, p.segment)
 				p.log[s].ballot = p.ballot
 				p.log[s].quorum = paxi.NewQuorum()
 				p.log[s].quorum.ACK(p.iss.ID())
@@ -302,7 +305,7 @@ func (p *ISSPaxos) update(scb map[int]CommandBallot) {
 
 		//log.Debugf("Calculating slot for p.slot = {%v} and s = {%v} for segment {%v} of epoch {%v}", p.slot, s, p.segment, p.epoch)
 		internalSlot := paxi.Max(p.slot, 0)
-		if p.slot > segmentSize {
+		if p.slot >= segmentSize {
 			internalSlot = segmentSize - 1
 		}
 		p.slot = paxi.Max(internalSlot, s)
@@ -336,7 +339,7 @@ func (p *ISSPaxos) HandleP2a(m P2a) {
 		// FIXME
 		//log.Debugf("Calculating slot for p.slot = {%v} and m.Slot = {%v} for segment {%v} of epoch {%v}", p.slot, m.Slot, p.segment, p.epoch)
 		internalSlot := paxi.Max(p.slot, 0)
-		if p.slot > segmentSize {
+		if p.slot >= segmentSize {
 			internalSlot = segmentSize - 1
 		}
 		p.slot = paxi.Max(internalSlot, m.Slot)
