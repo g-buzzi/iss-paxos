@@ -309,7 +309,7 @@ func (p *ISSPaxos) update(scb map[int]CommandBallot) {
 			internalSlot = segmentSize - 1
 		}
 		p.slot = paxi.Max(internalSlot, s)
-		s = p.slot
+		//s = p.slot
 		//log.Debugf("It decided on {%v}", p.slot)
 
 		if e, exists := p.log[s]; exists {
