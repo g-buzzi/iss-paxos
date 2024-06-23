@@ -15,6 +15,10 @@ if [ -z "${PID}" ]; then
     echo $! >> ${PID_FILE}
     ./client -id 1.4 -algorithm iss -config config.json &
     echo $! >> ${PID_FILE}
+    ./client -id 1.5 -algorithm iss -config config.json &
+    echo $! >> ${PID_FILE}
+    ./client -id 1.6 -algorithm iss -config config.json &
+    echo $! >> ${PID_FILE}
 else
     echo "Clients are already started in this folder."
     exit 0

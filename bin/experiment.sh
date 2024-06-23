@@ -2,6 +2,8 @@ go build ../server/
 go build ../client/
 go build ../cmd/
 
+
+
 ip=`hostname -I | xargs`
 echo $ip
 

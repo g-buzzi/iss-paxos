@@ -1,6 +1,8 @@
 package iss2
 
 import (
+	"time"
+
 	"github.com/ailidani/paxi"
 )
 
@@ -20,8 +22,21 @@ type Replica struct {
 	*ISS
 }
 
+var numBuckets int
+var numSegments int
+var segmentSize int
+var epochSize int
+var timeout time.Duration
+var heartbeat time.Duration
+
 // NewReplica generates new Paxos replica
-func NewReplica(id paxi.ID) *Replica {
+func NewReplica(id paxi.ID, buckets int, segments int, sizeSegment int, batchTimeout int, heartbeatTimeout int) *Replica {
+	numBuckets = buckets
+	numSegments = segments
+	segmentSize = sizeSegment
+	epochSize = numSegments * segmentSize
+	timeout = time.Millisecond * time.Duration(batchTimeout)
+	heartbeat = time.Millisecond * time.Duration(heartbeatTimeout)
 	r := new(Replica)
 	r.Node = paxi.NewNode(id)
 	r.ISS = NewISS(r)

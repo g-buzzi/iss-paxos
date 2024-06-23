@@ -29,6 +29,12 @@ var simulation = flag.Bool("sim", false, "simulation mode")
 
 var master = flag.String("master", "", "Master address.")
 
+var numBuckets = flag.Int("buckets", 2, "Number of buckets for ISS.")
+var numSegments = flag.Int("segments", 2, "Number of segments for ISS.")
+var segmentSize = flag.Int("segSize", 8, "Size of segments for ISS.")
+var batchTimeout = flag.Int("batch", 2, "Time in ms to wait for requests.")
+var heartbeat = flag.Int("heartbeat", 100, "Time in ms to wait for activity before trying to become leader.")
+
 func replica(id paxi.ID) {
 	if *master != "" {
 		paxi.ConnectToMaster(*master, false, id)
@@ -81,7 +87,7 @@ func replica(id paxi.ID) {
 		hpaxos.NewReplica(id).Run()
 
 	case "iss":
-		iss2.NewReplica(id).Run()
+		iss2.NewReplica(id, *numBuckets, *numSegments, *segmentSize, *batchTimeout, *heartbeat).Run()
 	default:
 		panic("Unknown algorithm")
 	}

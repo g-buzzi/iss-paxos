@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/ailidani/paxi"
+	"github.com/ailidani/paxi/log"
 )
 
 type BucketItem struct {
@@ -14,7 +15,7 @@ type BucketItem struct {
 }
 
 func RequestID(req *paxi.Request) string {
-	return strconv.Itoa(req.Command.ClientID.Zone()) + "." + strconv.Itoa(req.Command.ClientID.Node()) + "." + strconv.Itoa(req.Command.CommandID)
+	return strconv.Itoa(req.Command.ClientID.Zone()) + "." + strconv.Itoa(req.Command.ClientID.Node()) + "." + strconv.Itoa(req.Command.CommandID) + "." + strconv.Itoa(int(req.Command.Key))
 }
 
 type Bucket struct {
@@ -40,8 +41,10 @@ func NewBucket() *Bucket {
 }
 
 func (b *Bucket) Add(req *paxi.Request) {
+
 	bucketItem := BucketItem{request: req}
-	b.mutex.Lock()
+	b.Lock()
+	log.Debugf("Added request: %v to bucket", RequestID(req))
 	_, exists := b.reqIndex[RequestID(req)]
 	if exists {
 		b.mutex.Unlock()
@@ -57,9 +60,12 @@ func (b *Bucket) Add(req *paxi.Request) {
 		b.lastReq = &bucketItem
 	}
 	b.NumRequests += 1
-	b.mutex.Unlock()
+	b.Unlock()
 	if b.group != nil {
-		b.group.getTrigger <- true
+		select {
+		case b.group.getTrigger <- true:
+		default:
+		}
 	}
 }
 
@@ -103,13 +109,16 @@ func (b *Bucket) Get() *paxi.Request { //needs to be called while locked
 		b.firstReq = next
 		b.NumRequests -= 1
 	}
+	log.Debugf("Removed request: %v to bucket", RequestID(bucketItem.request))
 	return bucketItem.request
 }
 
 func (b *Bucket) Lock() {
+	//log.Debugf("Locking %v", b)
 	b.mutex.Lock()
 }
 
 func (b *Bucket) Unlock() {
+	//log.Debugf("Unlocking %v", b)
 	b.mutex.Unlock()
 }

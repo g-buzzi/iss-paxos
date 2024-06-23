@@ -4,21 +4,28 @@ import (
 	"time"
 
 	"github.com/ailidani/paxi"
+	"github.com/ailidani/paxi/log"
 )
+
+type work struct {
+	id       string
+	argument interface{}
+}
 
 // Paxos instance
 type ISSPaxos struct {
 	iss           *ISS
 	starterLeader bool
-	slotNumbers   []int
 	epoch         int
 	segment       int
 	BucketGroup   *BucketGroup
 	active        bool        // active leader
 	ballot        paxi.Ballot // highest ballot number
-	slot          int         // highest index of slotNumbers used
+	slot          int         // highest index of slot used
 	heartbeat     chan bool
 	timer         *time.Timer
+	log           map[int]*entry // Internal log of the segment
+	workQueue     chan work      //Ordering of messages that the instace needs to handle
 
 	quorum *paxi.Quorum // phase 1 quorum
 
@@ -28,18 +35,19 @@ type ISSPaxos struct {
 }
 
 // NewPaxos creates new paxos instance
-func NewISSPaxos(iss *ISS, leader paxi.ID, bucketGroup *BucketGroup, slotNumbers []int, epoch int, segment int) *ISSPaxos {
+func NewISSPaxos(iss *ISS, leader paxi.ID, bucketGroup *BucketGroup, epoch int64, segment int) *ISSPaxos {
 	p := &ISSPaxos{
 		iss:             iss,
 		active:          iss.ID() == leader,
 		starterLeader:   iss.ID() == leader,
-		slotNumbers:     slotNumbers,
 		BucketGroup:     bucketGroup,
 		ballot:          paxi.NewBallot(0, leader),
 		segment:         segment,
-		epoch:           epoch,
+		epoch:           int(epoch),
 		slot:            -1,
-		heartbeat:       make(chan bool, 100), //FIXME:size of this shouldn't matter
+		heartbeat:       make(chan bool, 1), //FIXME:size of this shouldn't matter
+		workQueue:       make(chan work, 200),
+		log:             make(map[int]*entry, segmentSize),
 		quorum:          paxi.NewQuorum(),
 		Q1:              func(q *paxi.Quorum) bool { return q.Majority() },
 		Q2:              func(q *paxi.Quorum) bool { return q.Majority() },
@@ -51,36 +59,77 @@ func NewISSPaxos(iss *ISS, leader paxi.ID, bucketGroup *BucketGroup, slotNumbers
 }
 
 func (p *ISSPaxos) run() {
+	go p.worker()
+	p.timer = time.AfterFunc(heartbeat, func() {
+		select {
+		case p.heartbeat <- true:
+		default:
+		}
+	})
+	go p.heartbeatMonitor()
+
 	if p.starterLeader {
 		//log.Debugf("Node is leader of segment %v of epoch %v", p.segment, p.epoch)
-		for p.slot < len(p.slotNumbers)-1 && p.active {
+		for i := 0; i < segmentSize && p.active; i++ {
 			request := p.BucketGroup.get()
-			p.P2a(request)
+			p.workQueue <- work{id: "P2A", argument: request}
 		}
 	}
-	p.timer = time.AfterFunc(heartbeat, func() { p.heartbeat <- true })
-	go p.heartbeatMonitor()
+}
+
+func (p *ISSPaxos) worker() {
+	keepWorker := true
+	for keepWorker {
+		job := <-p.workQueue
+		log.Debugf("Executing %v s=%v", job.id, p.segment)
+		switch job.id {
+		case "P1A":
+			p.P1a()
+		case "P2A":
+			if job.argument == nil {
+				p.P2a(nil)
+			} else {
+				p.P2a(job.argument.(*paxi.Request))
+			}
+		case "HP1A":
+			p.HandleP1a(job.argument.(P1a))
+		case "HP1B":
+			p.HandleP1b(job.argument.(P1b))
+		case "HP2A":
+			p.HandleP2a(job.argument.(P2a))
+		case "HP2B":
+			p.HandleP2b(job.argument.(P2b))
+		case "HP3":
+			p.HandleP3(job.argument.(P3))
+		case "End":
+			keepWorker = false
+		default:
+			log.Debugf("No known handler for message!!!!!!!!!!!")
+		}
+	}
+	select {
+	case p.heartbeat <- false:
+	default:
+	}
+	//close(p.workQueue)
 }
 
 func (p *ISSPaxos) heartbeatMonitor() {
-	//log.Debugf("HeartbeatMonitor on node %v for segment %v of epoch %v", p.iss.ID(), p.segment, p.epoch)
-	for p.iss.execute <= p.slotNumbers[segmentSize-1] && (p.iss.log[p.slotNumbers[segmentSize-1]] == nil || !p.iss.log[p.slotNumbers[segmentSize-1]].commit) {
+	for p.slot < segmentSize-1 || !(p.log[segmentSize-1] != nil && p.log[segmentSize-1].commit) { //FIXME: This condition may not account for non-commited entries
 
 		expired := <-p.heartbeat // Wait for timer to expire
 
 		if !p.IsLeader() && expired {
-			//log.Debugf("Heartbeat timeout on node %v for segment %v of epoch %v and slot = {%v}", p.iss.ID(), p.segment, p.epoch, p.slot)
-			p.P1a()
+			p.workQueue <- work{id: "P1A", argument: nil}
 		}
 		p.ResetTimer()
 	}
-	//log.Debugf("HeartbeatMonitor killed on node %v for segment %v of epoch %v", p.iss.ID(), p.segment, p.epoch)
 }
 
 func (p *ISSPaxos) ResetTimer() {
-	if !p.timer.Stop() {
-		<-p.timer.C
-	}
+	//if !p.timer.Stop() {
+	//	<-p.timer.C
+	//}
 	p.timer.Reset(heartbeat)
 }
 
@@ -114,6 +163,7 @@ func (p *ISSPaxos) P1a() {
 	if p.active {
 		return
 	}
+	p.ResetTimer()
 	p.ballot.Next(p.iss.ID())
 	p.quorum.Reset()
 	p.quorum.ACK(p.iss.ID())
@@ -136,12 +186,11 @@ func (p *ISSPaxos) HandleP1a(m P1a) {
 
 	//log.Debugf("Making the log mapping")
 	l := make(map[int]CommandBallot)
-	for i := 0; i < len(p.slotNumbers); i++ {
-		s := p.slotNumbers[i]
-		if p.iss.log[s] == nil || p.iss.log[s].commit {
+	for s := 0; s < segmentSize; s++ {
+		if p.log[s] == nil || p.log[s].commit {
 			continue
 		}
-		l[i] = CommandBallot{p.iss.log[s].command, p.iss.log[s].ballot}
+		l[s] = CommandBallot{p.log[s].command, p.log[s].ballot}
 	}
 	//log.Debugf("Log mapped")
 	p.iss.Send(m.Ballot.ID(), P1b{
@@ -155,8 +204,9 @@ func (p *ISSPaxos) HandleP1a(m P1a) {
 
 // HandleP1b handles P1b message
 func (p *ISSPaxos) HandleP1b(m P1b) {
+	log.Debugf("Updating Log")
 	p.update(m.Log)
-
+	log.Debugf("Got past")
 	// old message
 	if m.Ballot < p.ballot || p.active {
 		return
@@ -169,30 +219,33 @@ func (p *ISSPaxos) HandleP1b(m P1b) {
 
 	// ack message
 	if m.Ballot.ID() == p.iss.ID() && m.Ballot == p.ballot {
+		log.Debugf("Trying Ack")
 		p.quorum.ACK(m.ID)
 		if p.Q1(p.quorum) {
+			log.Debugf("Got Quorum")
 			p.active = true
-			for i := 0; i <= p.slot; i++ {
-				s := p.slotNumbers[i]
-				if p.iss.log[s].commit || p.iss.log[s] == nil {
+			for s := 0; s <= p.slot; s++ {
+				if p.log[s] == nil || p.log[s].commit || s >= segmentSize {
 					//log.Debugf("Skipping log for %v after steal of segment %v in epoch %v", s, p.segment, p.epoch)
 					continue
 				}
-				p.iss.log[s].ballot = p.ballot
-				p.iss.log[s].quorum = paxi.NewQuorum()
-				p.iss.log[s].quorum.ACK(p.iss.ID())
+				p.log[s].ballot = p.ballot
+				p.log[s].quorum = paxi.NewQuorum()
+				p.log[s].quorum.ACK(p.iss.ID())
 				p.iss.Broadcast(P2a{
 					Ballot:  p.ballot,
-					Slot:    i,
-					Command: p.iss.log[i].command,
+					Slot:    s,
+					Epoch:   p.epoch,
+					Segment: p.segment,
+					Command: p.log[s].command,
 				})
 			}
 			// propose new commands
 			for i := p.slot + 1; i < segmentSize; i++ {
-				if p.iss.log[p.slotNumbers[i]] != nil {
+				if p.log[i] != nil {
 					continue
 				}
-				p.P2a(nil)
+				p.workQueue <- work{id: "P2A", argument: nil}
 			}
 		}
 	}
@@ -200,8 +253,16 @@ func (p *ISSPaxos) HandleP1b(m P1b) {
 
 // P2a starts phase 2 accept
 func (p *ISSPaxos) P2a(r *paxi.Request) {
+	if p.slot == segmentSize || !p.IsLeader() {
+		if r != nil {
+			p.iss.reviveRequest(*r)
+		}
+		return
+	}
 	p.slot++
-	s := p.slotNumbers[p.slot]
+	s := p.slot
+
+	p.ResetTimer()
 
 	var command paxi.Command
 	if r != nil {
@@ -210,7 +271,7 @@ func (p *ISSPaxos) P2a(r *paxi.Request) {
 		command = paxi.Command{Key: 0, Value: nil, ClientID: "", CommandID: 0}
 	}
 
-	p.iss.log[s] = &entry{
+	p.log[s] = &entry{
 		ballot:    p.ballot,
 		command:   command,
 		request:   r,
@@ -220,10 +281,12 @@ func (p *ISSPaxos) P2a(r *paxi.Request) {
 
 	//log.Debugf("Log: %v", p.iss.log[s])
 
-	p.iss.log[s].quorum.ACK(p.iss.ID())
+	p.log[s].quorum.ACK(p.iss.ID())
 	m := P2a{
 		Ballot:  p.ballot,
 		Slot:    s,
+		Epoch:   p.epoch,
+		Segment: p.segment,
 		Command: command,
 	}
 	if paxi.GetConfig().Thrifty {
@@ -242,17 +305,17 @@ func (p *ISSPaxos) update(scb map[int]CommandBallot) {
 		if p.slot > segmentSize {
 			internalSlot = segmentSize - 1
 		}
-		p.slot = paxi.Max(internalSlot, (s-(epochSize*p.epoch))/numSegments) //Value gets floored as its a division between ints
+		p.slot = paxi.Max(internalSlot, s)
 		s = p.slot
 		//log.Debugf("It decided on {%v}", p.slot)
 
-		if e, exists := p.iss.log[s]; exists {
+		if e, exists := p.log[s]; exists {
 			if !e.commit && cb.Ballot > e.ballot {
 				e.ballot = cb.Ballot
 				e.command = cb.Command
 			}
 		} else {
-			p.iss.log[s] = &entry{
+			p.log[s] = &entry{
 				ballot:  cb.Ballot,
 				command: cb.Command,
 				commit:  false,
@@ -276,11 +339,11 @@ func (p *ISSPaxos) HandleP2a(m P2a) {
 		if p.slot > segmentSize {
 			internalSlot = segmentSize - 1
 		}
-		p.slot = paxi.Max(internalSlot, (m.Slot-(epochSize*p.epoch))/numSegments)
+		p.slot = paxi.Max(internalSlot, m.Slot)
 		//log.Debugf("It decided on {%v}", p.slot)
 
 		// update entry
-		if e, exists := p.iss.log[m.Slot]; exists {
+		if e, exists := p.log[m.Slot]; exists {
 			if !e.commit && m.Ballot > e.ballot {
 				// different command and request is not nil
 				if !e.command.Equal(m.Command) && e.request != nil {
@@ -292,7 +355,7 @@ func (p *ISSPaxos) HandleP2a(m P2a) {
 				e.ballot = m.Ballot
 			}
 		} else {
-			p.iss.log[m.Slot] = &entry{
+			p.log[m.Slot] = &entry{
 				ballot:  m.Ballot,
 				command: m.Command,
 				commit:  false,
@@ -302,9 +365,11 @@ func (p *ISSPaxos) HandleP2a(m P2a) {
 	}
 
 	p.iss.Send(m.Ballot.ID(), P2b{
-		Ballot: p.ballot,
-		Slot:   m.Slot,
-		ID:     p.iss.ID(),
+		Ballot:  p.ballot,
+		Slot:    m.Slot,
+		Epoch:   p.epoch,
+		Segment: p.segment,
+		ID:      p.iss.ID(),
 	})
 }
 
@@ -312,7 +377,7 @@ func (p *ISSPaxos) HandleP2a(m P2a) {
 func (p *ISSPaxos) HandleP2b(m P2b) {
 	// old message
 
-	entry, exist := p.iss.log[m.Slot]
+	entry, exist := p.log[m.Slot]
 	if !exist || m.Ballot < entry.ballot || entry.commit {
 		//log.Debugf("Silent reject")
 		return
@@ -330,25 +395,28 @@ func (p *ISSPaxos) HandleP2b(m P2b) {
 	// ack message
 	// the current slot might still be committed with q2
 	// if no q2 can be formed, this slot will be retried when received p2a or p3
-	if m.Ballot.ID() == p.iss.ID() && m.Ballot == p.iss.log[m.Slot].ballot {
-		p.iss.log[m.Slot].quorum.ACK(m.ID)
-		if p.Q2(p.iss.log[m.Slot].quorum) {
-			p.iss.log[m.Slot].commit = true
+	if m.Ballot.ID() == p.iss.ID() && m.Ballot == p.log[m.Slot].ballot {
+		p.log[m.Slot].quorum.ACK(m.ID)
+		if p.Q2(p.log[m.Slot].quorum) {
+			p.log[m.Slot].commit = true
 			p.iss.Broadcast(P3{
 				Ballot:  m.Ballot,
 				Slot:    m.Slot,
-				Command: p.iss.log[m.Slot].command,
+				Epoch:   p.epoch,
+				Segment: p.segment,
+				Command: p.log[m.Slot].command,
 			})
 
 			if p.ReplyWhenCommit {
-				r := p.iss.log[m.Slot].request
+				r := p.log[m.Slot].request
 				r.Reply(paxi.Reply{
 					Command:   r.Command,
 					Timestamp: r.Timestamp,
 				})
 			}
 
-			p.iss.logUpdate <- true
+			p.iss.logChan <- logUpdate{entry: *p.log[m.Slot],
+				slot: (p.epoch * epochSize) + (m.Slot * numSegments) + p.segment}
 
 		}
 	}
@@ -364,7 +432,7 @@ func (p *ISSPaxos) HandleP3(m P3) {
 	if p.slot > segmentSize {
 		internalSlot = segmentSize - 1
 	}
-	p.slot = paxi.Max(internalSlot, (m.Slot-(epochSize*p.epoch))/numSegments)
+	p.slot = paxi.Max(internalSlot, m.Slot)
 	//log.Debugf("It decided on = {%v}", p.slot)
 	//internalSlot := paxi.Max(p.slot, 0)
 	//if p.slot > segmentSize {
@@ -372,7 +440,7 @@ func (p *ISSPaxos) HandleP3(m P3) {
 	//}
 	//s := p.slotNumbers[internalSlot]
 	//p.slot = paxi.Max(m.Slot, s) / segmentSize //Value gets floored as its a division between ints
-	e, exist := p.iss.log[m.Slot]
+	e, exist := p.log[m.Slot]
 	if exist { //FIXME
 		if !e.command.Equal(m.Command) && e.request != nil {
 			// p.Retry(*e.request)
@@ -381,13 +449,14 @@ func (p *ISSPaxos) HandleP3(m P3) {
 			//log.Debugf("Set request on nil at P3")
 		}
 	} else {
-		p.iss.log[m.Slot] = &entry{}
-		e = p.iss.log[m.Slot]
+		p.log[m.Slot] = &entry{}
+		e = p.log[m.Slot]
 	}
 
 	e.command = m.Command
 	e.commit = true
-	p.iss.logUpdate <- true
+	p.iss.logChan <- logUpdate{entry: *p.log[m.Slot],
+		slot: (p.epoch * epochSize) + (m.Slot * numSegments) + p.segment}
 
 	if p.ReplyWhenCommit {
 		if e.request != nil {

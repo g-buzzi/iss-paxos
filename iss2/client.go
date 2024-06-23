@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"io/ioutil"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httputil"
 	"strconv"
@@ -30,12 +31,18 @@ func NewClient(id paxi.ID) *Client {
 
 // RESTGet issues a http call to node and return value and headers
 func (c *Client) RESTGet(key paxi.Key) (paxi.Value, map[string]string, error) {
-	return c.broadcast(key, nil)
+	serverId := c.selectRandom()
+	return c.rest(serverId, key, nil)
+}
+
+func (c *Client) selectRandom() paxi.ID {
+	return c.serverIDs[rand.IntN(len(c.serverIDs))]
 }
 
 // RESTPut puts new value as http.request body and return previous value
 func (c *Client) RESTPut(key paxi.Key, value paxi.Value) (paxi.Value, map[string]string, error) {
-	return c.broadcast(key, value)
+	serverId := c.selectRandom()
+	return c.rest(serverId, key, value)
 }
 
 func (c *Client) Get(key paxi.Key) (paxi.Value, error) {
@@ -50,13 +57,6 @@ func (c *Client) Put(key paxi.Key, value paxi.Value) error {
 	c.CID++
 	_, _, err := c.RESTPut(key, value)
 	return err
-}
-
-func (c *Client) broadcast(key paxi.Key, value paxi.Value) (paxi.Value, map[string]string, error) {
-	for _, serverId := range c.serverIDs {
-		c.rest(serverId, key, value)
-	}
-	return nil, nil, nil
 }
 
 func (c *Client) rest(id paxi.ID, key paxi.Key, value paxi.Value) (paxi.Value, map[string]string, error) {
