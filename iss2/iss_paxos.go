@@ -22,7 +22,7 @@ type ISSPaxos struct {
 	active        bool        // active leader
 	ballot        paxi.Ballot // highest ballot number
 	slot          int         // highest index of slot used
-	heartbeat     chan bool
+	heartbeat     chan int
 	timer         *time.Timer
 	log           map[int]*entry // Internal log of the segment
 	workQueue     chan work      //Ordering of messages that the instace needs to handle
@@ -45,7 +45,7 @@ func NewISSPaxos(iss *ISS, leader paxi.ID, bucketGroup *BucketGroup, epoch int64
 		segment:         segment,
 		epoch:           int(epoch),
 		slot:            -1,
-		heartbeat:       make(chan bool, 1), //FIXME:size of this shouldn't matter
+		heartbeat:       make(chan int, 1), //FIXME:size of this shouldn't matter
 		workQueue:       make(chan work, 200),
 		log:             make(map[int]*entry, segmentSize),
 		quorum:          paxi.NewQuorum(),
@@ -61,10 +61,7 @@ func NewISSPaxos(iss *ISS, leader paxi.ID, bucketGroup *BucketGroup, epoch int64
 func (p *ISSPaxos) run() {
 	go p.worker()
 	p.timer = time.AfterFunc(heartbeat, func() {
-		select {
-		case p.heartbeat <- true:
-		default:
-		}
+		p.sendHeartbeat(1)
 	})
 	go p.heartbeatMonitor()
 
@@ -107,30 +104,31 @@ func (p *ISSPaxos) worker() {
 			log.Debugf("No known handler for message!!!!!!!!!!!")
 		}
 	}
-	select {
-	case p.heartbeat <- false:
-	default:
-	}
+	p.sendHeartbeat(-1)
 	//close(p.workQueue)
 }
 
 func (p *ISSPaxos) heartbeatMonitor() {
-	for p.slot < segmentSize-1 || !(p.log[segmentSize-1] != nil && p.log[segmentSize-1].commit) { //FIXME: This condition may not account for non-commited entries
+	heartbeatStatus := 0
+	for heartbeatStatus >= 0 {
 
-		expired := <-p.heartbeat // Wait for timer to expire
+		heartbeatStatus = <-p.heartbeat
 
-		if !p.IsLeader() && expired {
+		if heartbeatStatus == 1 {
 			p.workQueue <- work{id: "P1A", argument: nil}
 		}
-		p.ResetTimer()
+		p.timer.Reset(heartbeat)
 	}
 }
 
-func (p *ISSPaxos) ResetTimer() {
+func (p *ISSPaxos) sendHeartbeat(status int) {
 	//if !p.timer.Stop() {
 	//	<-p.timer.C
 	//}
-	p.timer.Reset(heartbeat)
+	select {
+	case p.heartbeat <- status:
+	default:
+	}
 }
 
 // IsLeader indecates if this node is current leader
@@ -163,7 +161,7 @@ func (p *ISSPaxos) P1a() {
 	if p.active {
 		return
 	}
-	p.ResetTimer()
+	p.sendHeartbeat(0)
 	p.ballot.Next(p.iss.ID())
 	p.quorum.Reset()
 	p.quorum.ACK(p.iss.ID())
@@ -175,7 +173,7 @@ func (p *ISSPaxos) HandleP1a(m P1a) {
 	//log.Debugf("Replica %s received a message P1a of segment %v of epoch %v", m.Ballot.ID(), p.segment, p.epoch)
 
 	if m.Ballot > p.ballot {
-		p.ResetTimer()
+		p.sendHeartbeat(0)
 		//log.Debugf("Message is valid")
 		p.ballot = m.Ballot
 		if p.active {
@@ -265,7 +263,7 @@ func (p *ISSPaxos) P2a(r *paxi.Request) {
 	p.slot++
 	s := p.slot
 
-	p.ResetTimer()
+	p.sendHeartbeat(0)
 
 	var command paxi.Command
 	if r != nil {
@@ -332,7 +330,7 @@ func (p *ISSPaxos) HandleP2a(m P2a) {
 	// //log.Debugf("Replica %s ===[%v]===>>> Replica %s\n", m.Ballot.ID(), m, p.ID())
 
 	if m.Ballot >= p.ballot {
-		p.ResetTimer()
+		p.sendHeartbeat(0)
 		p.ballot = m.Ballot
 		p.active = false
 		// update slot number
@@ -428,7 +426,7 @@ func (p *ISSPaxos) HandleP2b(m P2b) {
 // HandleP3 handles phase 3 commit message
 func (p *ISSPaxos) HandleP3(m P3) {
 	// //log.Debugf("Replica %s ===[%v]===>>> Replica %s\n", m.Ballot.ID(), m, p.ID())
-	p.ResetTimer()
+	p.sendHeartbeat(0)
 	// FIXME
 	//log.Debugf("Calculating slot for p.slot = {%v} and m.Slot = {%v} for segment {%v} of epoch {%v}", p.slot, m.Slot, p.segment, p.epoch)
 	internalSlot := paxi.Max(p.slot, 0)
