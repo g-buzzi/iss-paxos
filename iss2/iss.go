@@ -4,12 +4,15 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/ailidani/paxi"
 	"github.com/ailidani/paxi/log"
 )
+
+var logRetention = 5
 
 // entry in log
 type entry struct {
@@ -32,6 +35,7 @@ type ISS struct {
 	config         []paxi.ID
 	currentEpoch   int64
 	segments       []*ISSPaxos
+	segmentsMutex  *sync.RWMutex
 	epochBuffer    Stack //holds messages that are from future epochs
 	execute        int   // next execute slot number
 	log            map[int]*entry
@@ -49,6 +53,7 @@ func NewISS(n paxi.Node, options ...func(*ISS)) *ISS {
 		currentEpoch:   0,
 		log:            make(map[int]*entry, paxi.GetConfig().BufferSize),
 		segments:       make([]*ISSPaxos, numSegments),
+		segmentsMutex:  &sync.RWMutex{},
 		epochBuffer:    newStack(),
 		buckets:        make([]*Bucket, numBuckets),
 		logChan:        make(chan logUpdate, segmentSize*numSegments),
@@ -83,6 +88,7 @@ func (iss *ISS) runEpoch() {
 	for epoch := 0; true; epoch++ {
 		leaders := iss.selectLeader(epoch)
 
+		iss.segmentsMutex.Lock()
 		atomic.StoreInt64(&iss.currentEpoch, int64(-1))
 		for i, leader := range leaders {
 			bucketGroup := iss.createBucketGroup(epoch, i)
@@ -90,10 +96,11 @@ func (iss *ISS) runEpoch() {
 			go iss.segments[i].run()
 		}
 		atomic.StoreInt64(&iss.currentEpoch, int64(epoch))
+		iss.segmentsMutex.Unlock()
 
 		iss.retrieveBuffer <- true
 
-		for i := (int(iss.currentEpoch) - 2) * epochSize; i < int(iss.currentEpoch-1)*epochSize; i++ {
+		for i := (epoch - logRetention) * epochSize; i < (epoch-logRetention+1)*epochSize; i++ {
 			delete(iss.log, i)
 		}
 		<-iss.epochEnd
@@ -141,7 +148,8 @@ func (iss *ISS) bufferManager() {
 		select {
 		case added := <-iss.bufferChan:
 			internal := added.(InternalMessage)
-			if internal.epoch() == int(iss.currentEpoch) {
+			epoch := int(atomic.LoadInt64(&iss.currentEpoch))
+			if internal.epoch() == epoch {
 				switch fmt.Sprintf("%T", added) {
 				case "iss2.P1a":
 					iss.HandleP1a(added.(P1a))
@@ -154,7 +162,7 @@ func (iss *ISS) bufferManager() {
 				case "iss2.P3":
 					iss.HandleP3(added.(P3))
 				}
-			} else if internal.epoch() > int(iss.currentEpoch) {
+			} else if internal.epoch() > epoch {
 				iss.epochBuffer.add(added)
 			}
 		case <-iss.retrieveBuffer:
@@ -165,7 +173,8 @@ func (iss *ISS) bufferManager() {
 				log.Debugf("Got %v", message)
 				log.Debugf("Stack state %v", iss.epochBuffer.stack)
 				internal := message.(InternalMessage)
-				if internal.epoch() == int(iss.currentEpoch) {
+				epoch := int(atomic.LoadInt64(&iss.currentEpoch))
+				if internal.epoch() == epoch {
 					log.Debugf("Retrieving message from epoch buffer %v", message)
 					switch fmt.Sprintf("%T", message) {
 					case "iss2.P1a":
@@ -179,7 +188,7 @@ func (iss *ISS) bufferManager() {
 					case "iss2.P3":
 						iss.HandleP3(message.(P3))
 					}
-				} else if internal.epoch() > int(iss.currentEpoch) {
+				} else if internal.epoch() > epoch {
 					rejected.add(message)
 				}
 			}
@@ -190,12 +199,14 @@ func (iss *ISS) bufferManager() {
 
 // HandleP1a handles P1a message
 func (iss *ISS) HandleP1a(m P1a) {
+	iss.segmentsMutex.RLock()
 	if m.Epoch == int(iss.currentEpoch) {
 		iss.segments[m.Segment].workQueue <- work{id: "HP1A", argument: m}
 	} else if m.Epoch > int(iss.currentEpoch) {
 		iss.bufferChan <- m
 	}
-	//else if m.Epoch >= int(iss.currentEpoch) - 2 {
+	iss.segmentsMutex.RUnlock()
+	//else if m.Epoch >= int(iss.currentEpoch) - logRetention { //Deal with old instances that didn't receive a specific P3 message
 	//	for i := m.Epoch * epochSize; i < (m.Epoch+1)*epochSize; i++ {
 	//		iss.Send(m.Ballot.ID(), P3{
 	//			Ballot:  iss.log[i].ballot,
@@ -208,38 +219,46 @@ func (iss *ISS) HandleP1a(m P1a) {
 
 // HandleP1a handles P1b message
 func (iss *ISS) HandleP1b(m P1b) {
+	iss.segmentsMutex.RLock()
 	if m.Epoch == int(iss.currentEpoch) {
 		iss.segments[m.Segment].workQueue <- work{id: "HP1B", argument: m}
 	} else if m.Epoch > int(iss.currentEpoch) {
 		iss.bufferChan <- m
 	}
+	iss.segmentsMutex.RUnlock()
 }
 
 // HandleP2a handles P2a message
 func (iss *ISS) HandleP2a(m P2a) {
+	iss.segmentsMutex.RLock()
 	if m.Epoch == int(iss.currentEpoch) {
 		iss.segments[m.Segment].workQueue <- work{id: "HP2A", argument: m}
 	} else if m.Epoch > int(iss.currentEpoch) {
 		iss.bufferChan <- m
 	}
+	iss.segmentsMutex.Unlock()
 }
 
 // HandleP2b handles P2b message
 func (iss *ISS) HandleP2b(m P2b) {
+	iss.segmentsMutex.RLock()
 	if m.Epoch == int(iss.currentEpoch) {
 		iss.segments[m.Segment].workQueue <- work{id: "HP2B", argument: m}
 	} else if m.Epoch > int(iss.currentEpoch) {
 		iss.bufferChan <- m
 	}
+	iss.segmentsMutex.RUnlock()
 }
 
 // HandleP3 handles phase 3 commit message
 func (iss *ISS) HandleP3(m P3) {
+	iss.segmentsMutex.RLock()
 	if m.Epoch == int(iss.currentEpoch) {
 		iss.segments[m.Segment].workQueue <- work{id: "HP3", argument: m}
 	} else if m.Epoch > int(iss.currentEpoch) {
 		iss.bufferChan <- m
 	}
+	iss.segmentsMutex.RUnlock()
 }
 
 func (iss *ISS) exec() {
@@ -265,7 +284,7 @@ func (iss *ISS) exec() {
 			}
 			iss.execute++
 			e, exist = iss.log[iss.execute]
-			if iss.execute == (int(iss.currentEpoch)+1)*epochSize {
+			if iss.execute == (int(atomic.LoadInt64(&iss.currentEpoch))+1)*epochSize {
 				iss.epochEnd <- true
 			}
 		}
