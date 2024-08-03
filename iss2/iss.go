@@ -88,7 +88,7 @@ func (iss *ISS) runEpoch() {
 	for epoch := 0; true; epoch++ {
 		leaders := iss.selectLeader(epoch)
 
-		iss.segmentsMutex.Lock()
+		//iss.segmentsMutex.Lock()
 		atomic.StoreInt64(&iss.currentEpoch, int64(-1))
 		for i, leader := range leaders {
 			bucketGroup := iss.createBucketGroup(epoch, i)
@@ -96,7 +96,7 @@ func (iss *ISS) runEpoch() {
 			go iss.segments[i].run()
 		}
 		atomic.StoreInt64(&iss.currentEpoch, int64(epoch))
-		iss.segmentsMutex.Unlock()
+		//iss.segmentsMutex.Unlock()
 
 		iss.retrieveBuffer <- true
 
@@ -199,13 +199,13 @@ func (iss *ISS) bufferManager() {
 
 // HandleP1a handles P1a message
 func (iss *ISS) HandleP1a(m P1a) {
-	iss.segmentsMutex.RLock()
+	//iss.segmentsMutex.RLock()
 	if m.Epoch == int(iss.currentEpoch) {
 		iss.segments[m.Segment].workQueue <- work{id: "HP1A", argument: m}
 	} else if m.Epoch > int(iss.currentEpoch) {
 		iss.bufferChan <- m
 	}
-	iss.segmentsMutex.RUnlock()
+	//iss.segmentsMutex.RUnlock()
 	//else if m.Epoch >= int(iss.currentEpoch) - logRetention { //Deal with old instances that didn't receive a specific P3 message
 	//	for i := m.Epoch * epochSize; i < (m.Epoch+1)*epochSize; i++ {
 	//		iss.Send(m.Ballot.ID(), P3{
@@ -219,46 +219,46 @@ func (iss *ISS) HandleP1a(m P1a) {
 
 // HandleP1a handles P1b message
 func (iss *ISS) HandleP1b(m P1b) {
-	iss.segmentsMutex.RLock()
+	//iss.segmentsMutex.RLock()
 	if m.Epoch == int(iss.currentEpoch) {
 		iss.segments[m.Segment].workQueue <- work{id: "HP1B", argument: m}
 	} else if m.Epoch > int(iss.currentEpoch) {
 		iss.bufferChan <- m
 	}
-	iss.segmentsMutex.RUnlock()
+	//iss.segmentsMutex.RUnlock()
 }
 
 // HandleP2a handles P2a message
 func (iss *ISS) HandleP2a(m P2a) {
-	iss.segmentsMutex.RLock()
+	//iss.segmentsMutex.RLock()
 	if m.Epoch == int(iss.currentEpoch) {
 		iss.segments[m.Segment].workQueue <- work{id: "HP2A", argument: m}
 	} else if m.Epoch > int(iss.currentEpoch) {
 		iss.bufferChan <- m
 	}
-	iss.segmentsMutex.Unlock()
+	//iss.segmentsMutex.RUnlock()
 }
 
 // HandleP2b handles P2b message
 func (iss *ISS) HandleP2b(m P2b) {
-	iss.segmentsMutex.RLock()
+	//iss.segmentsMutex.RLock()
 	if m.Epoch == int(iss.currentEpoch) {
 		iss.segments[m.Segment].workQueue <- work{id: "HP2B", argument: m}
 	} else if m.Epoch > int(iss.currentEpoch) {
 		iss.bufferChan <- m
 	}
-	iss.segmentsMutex.RUnlock()
+	//iss.segmentsMutex.RUnlock()
 }
 
 // HandleP3 handles phase 3 commit message
 func (iss *ISS) HandleP3(m P3) {
-	iss.segmentsMutex.RLock()
+	//iss.segmentsMutex.RLock()
 	if m.Epoch == int(iss.currentEpoch) {
 		iss.segments[m.Segment].workQueue <- work{id: "HP3", argument: m}
 	} else if m.Epoch > int(iss.currentEpoch) {
 		iss.bufferChan <- m
 	}
-	iss.segmentsMutex.RUnlock()
+	//iss.segmentsMutex.RUnlock()
 }
 
 func (iss *ISS) exec() {

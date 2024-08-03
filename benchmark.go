@@ -268,7 +268,7 @@ func (b *Benchmark) worker(keys <-chan int, result chan<- time.Duration) {
 			result <- e.Sub(s)
 		} else {
 			op.end = math.MaxInt64
-			log.Error(err)
+			//log.Error(err)
 		}
 		b.History.AddOperation(k, op)
 	}
