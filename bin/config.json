@@ -22,7 +22,7 @@
         "N": 0,
         "K": 1000,
         "W": 0.5,
-        "Throttle": 0,
+        "Throttle": 100,
         "Concurrency": 1,
         "Distribution": "uniform",
         "LinearizabilityCheck": true,
