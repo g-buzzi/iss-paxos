@@ -16,7 +16,7 @@
     "buffer_size": 2048,
     "multiversion": false,
     "benchmark": {
-        "T": 600,
+        "T": 90,
         "N": 0,
         "K": 1000,
         "W": 0.5,
