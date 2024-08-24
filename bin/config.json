@@ -2,14 +2,12 @@
     "address": {
         "1.1": "tcp://10.10.1.1:1735",
         "1.2": "tcp://10.10.1.2:1735",
-        "1.3": "tcp://10.10.1.3:1735",
-        "1.4": "tcp://10.10.1.4:1735"
+        "1.3": "tcp://10.10.1.3:1735"
     },
     "http_address": {
         "1.1": "http://10.10.1.1:8080",
         "1.2": "http://10.10.1.2:8080",
-        "1.3": "http://10.10.1.3:8080",
-        "1.4": "http://10.10.1.4:8080"
+        "1.3": "http://10.10.1.3:8080"
     },
     "policy": "majority",
     "threshold": 3,
@@ -20,10 +18,10 @@
     "benchmark": {
         "T": 60,
         "N": 0,
-        "K": 1000,
+        "K": 5000,
         "W": 0.5,
-        "Throttle": 1000,
-        "Concurrency": 64,
+        "Throttle": 50,
+        "Concurrency": 32,
         "Distribution": "uniform",
         "LinearizabilityCheck": true,
         "Conflicts": 0,

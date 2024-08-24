@@ -42,6 +42,8 @@ type ISS struct {
 	buckets        []*Bucket
 	logChan        chan logUpdate
 	bufferChan     chan interface{}
+	epochChan      chan int
+	messageChan    chan interface{}
 	retrieveBuffer chan bool
 	epochEnd       chan bool
 }
@@ -58,6 +60,8 @@ func NewISS(n paxi.Node, options ...func(*ISS)) *ISS {
 		buckets:        make([]*Bucket, numBuckets),
 		logChan:        make(chan logUpdate, segmentSize*numSegments),
 		bufferChan:     make(chan interface{}, segmentSize*numSegments),
+		epochChan:      make(chan int),
+		messageChan:    make(chan interface{}, paxi.GetConfig().BufferSize),
 		retrieveBuffer: make(chan bool, 10),
 		epochEnd:       make(chan bool),
 	}
@@ -85,28 +89,50 @@ func (iss *ISS) orderIDS() {
 }
 
 func (iss *ISS) runEpoch() {
-	for epoch := 0; true; epoch++ {
-		leaders := iss.selectLeader(epoch)
-
-		//iss.segmentsMutex.Lock()
-		atomic.StoreInt64(&iss.currentEpoch, int64(-1))
-		for i, leader := range leaders {
-			bucketGroup := iss.createBucketGroup(epoch, i)
-			iss.segments[i] = NewISSPaxos(iss, leader, bucketGroup, int64(epoch), i)
-			go iss.segments[i].run()
+	typeMap := map[string]string{
+		"iss2.P1a": "HP1A",
+		"iss2.P1b": "HP1B",
+		"iss2.P2a": "HP2A",
+		"iss2.P2b": "HP2B",
+		"iss2.P3":  "HP3",
+	}
+	iss.startEpoch(0)
+	for {
+		select {
+		// Starts a new Epoch
+		case <-iss.epochEnd:
+			for i := 0; i < numSegments; i++ {
+				iss.segments[i].workQueue <- work{id: "End", argument: nil}
+			}
+			iss.startEpoch(int(iss.currentEpoch) + 1)
+		// Deals with new messages
+		case m := <-iss.messageChan:
+			message := m.(InternalMessage)
+			if message.epoch() == int(iss.currentEpoch) {
+				command := typeMap[fmt.Sprintf("%T", m)]
+				iss.segments[message.segment()].workQueue <- work{id: command, argument: m}
+			} else if message.epoch() > int(iss.currentEpoch) {
+				iss.bufferChan <- m
+			}
 		}
-		atomic.StoreInt64(&iss.currentEpoch, int64(epoch))
-		//iss.segmentsMutex.Unlock()
+	}
+}
 
-		iss.retrieveBuffer <- true
+func (iss *ISS) startEpoch(epoch int) {
+	leaders := iss.selectLeader(epoch)
 
-		for i := (epoch - logRetention) * epochSize; i < (epoch-logRetention+1)*epochSize; i++ {
-			delete(iss.log, i)
-		}
-		<-iss.epochEnd
-		for i := 0; i < numSegments; i++ {
-			iss.segments[i].workQueue <- work{id: "End", argument: nil}
-		}
+	atomic.StoreInt64(&iss.currentEpoch, int64(-1))
+	for i, leader := range leaders {
+		bucketGroup := iss.createBucketGroup(epoch, i)
+		iss.segments[i] = NewISSPaxos(iss, leader, bucketGroup, int64(epoch), i)
+		go iss.segments[i].run()
+	}
+	atomic.StoreInt64(&iss.currentEpoch, int64(epoch))
+
+	iss.retrieveBuffer <- true
+
+	for i := (epoch - logRetention) * epochSize; i < (epoch-logRetention+1)*epochSize; i++ {
+		delete(iss.log, i)
 	}
 }
 
@@ -150,18 +176,21 @@ func (iss *ISS) bufferManager() {
 			internal := added.(InternalMessage)
 			epoch := int(atomic.LoadInt64(&iss.currentEpoch))
 			if internal.epoch() == epoch {
-				switch fmt.Sprintf("%T", added) {
-				case "iss2.P1a":
-					iss.HandleP1a(added.(P1a))
-				case "iss2.P1b":
-					iss.HandleP1b(added.(P1b))
-				case "iss2.P2a":
-					iss.HandleP2a(added.(P2a))
-				case "iss2.P2b":
-					iss.HandleP2b(added.(P2b))
-				case "iss2.P3":
-					iss.HandleP3(added.(P3))
-				}
+				iss.messageChan <- added
+				/*
+					switch fmt.Sprintf("%T", added) {
+					case "iss2.P1a":
+						iss.HandleP1a(added.(P1a))
+					case "iss2.P1b":
+						iss.HandleP1b(added.(P1b))
+					case "iss2.P2a":
+						iss.HandleP2a(added.(P2a))
+					case "iss2.P2b":
+						iss.HandleP2b(added.(P2b))
+					case "iss2.P3":
+						iss.HandleP3(added.(P3))
+					}
+				*/
 			} else if internal.epoch() > epoch {
 				iss.epochBuffer.add(added)
 			}
@@ -176,18 +205,21 @@ func (iss *ISS) bufferManager() {
 				epoch := int(atomic.LoadInt64(&iss.currentEpoch))
 				if internal.epoch() == epoch {
 					log.Debugf("Retrieving message from epoch buffer %v", message)
-					switch fmt.Sprintf("%T", message) {
-					case "iss2.P1a":
-						iss.HandleP1a(message.(P1a))
-					case "iss2.P1b":
-						iss.HandleP1b(message.(P1b))
-					case "iss2.P2a":
-						iss.HandleP2a(message.(P2a))
-					case "iss2.P2b":
-						iss.HandleP2b(message.(P2b))
-					case "iss2.P3":
-						iss.HandleP3(message.(P3))
-					}
+					iss.messageChan <- message
+					/*
+						switch fmt.Sprintf("%T", message) {
+						case "iss2.P1a":
+							iss.HandleP1a(message.(P1a))
+						case "iss2.P1b":
+							iss.HandleP1b(message.(P1b))
+						case "iss2.P2a":
+							iss.HandleP2a(message.(P2a))
+						case "iss2.P2b":
+							iss.HandleP2b(message.(P2b))
+						case "iss2.P3":
+							iss.HandleP3(message.(P3))
+						}
+					*/
 				} else if internal.epoch() > epoch {
 					rejected.add(message)
 				}
@@ -199,13 +231,15 @@ func (iss *ISS) bufferManager() {
 
 // HandleP1a handles P1a message
 func (iss *ISS) HandleP1a(m P1a) {
-	//iss.segmentsMutex.RLock()
-	if m.Epoch == int(iss.currentEpoch) {
-		iss.segments[m.Segment].workQueue <- work{id: "HP1A", argument: m}
-	} else if m.Epoch > int(iss.currentEpoch) {
-		iss.bufferChan <- m
-	}
-	//iss.segmentsMutex.RUnlock()
+	iss.messageChan <- m
+	/*
+		if m.Epoch == int(iss.currentEpoch) {
+			iss.segments[m.Segment].workQueue <- work{id: "HP1A", argument: m}
+		} else if m.Epoch > int(iss.currentEpoch) {
+			iss.bufferChan <- m
+		}
+	*/
+
 	//else if m.Epoch >= int(iss.currentEpoch) - logRetention { //Deal with old instances that didn't receive a specific P3 message
 	//	for i := m.Epoch * epochSize; i < (m.Epoch+1)*epochSize; i++ {
 	//		iss.Send(m.Ballot.ID(), P3{
@@ -219,46 +253,50 @@ func (iss *ISS) HandleP1a(m P1a) {
 
 // HandleP1a handles P1b message
 func (iss *ISS) HandleP1b(m P1b) {
-	//iss.segmentsMutex.RLock()
-	if m.Epoch == int(iss.currentEpoch) {
-		iss.segments[m.Segment].workQueue <- work{id: "HP1B", argument: m}
-	} else if m.Epoch > int(iss.currentEpoch) {
-		iss.bufferChan <- m
-	}
-	//iss.segmentsMutex.RUnlock()
+	iss.messageChan <- m
+	/*
+		if m.Epoch == int(iss.currentEpoch) {
+			iss.segments[m.Segment].workQueue <- work{id: "HP1B", argument: m}
+		} else if m.Epoch > int(iss.currentEpoch) {
+			iss.bufferChan <- m
+		}
+	*/
 }
 
 // HandleP2a handles P2a message
 func (iss *ISS) HandleP2a(m P2a) {
-	//iss.segmentsMutex.RLock()
-	if m.Epoch == int(iss.currentEpoch) {
-		iss.segments[m.Segment].workQueue <- work{id: "HP2A", argument: m}
-	} else if m.Epoch > int(iss.currentEpoch) {
-		iss.bufferChan <- m
-	}
-	//iss.segmentsMutex.RUnlock()
+	iss.messageChan <- m
+	/*
+		if m.Epoch == int(iss.currentEpoch) {
+			iss.segments[m.Segment].workQueue <- work{id: "HP2A", argument: m}
+		} else if m.Epoch > int(iss.currentEpoch) {
+			iss.bufferChan <- m
+		}
+	*/
 }
 
 // HandleP2b handles P2b message
 func (iss *ISS) HandleP2b(m P2b) {
-	//iss.segmentsMutex.RLock()
-	if m.Epoch == int(iss.currentEpoch) {
-		iss.segments[m.Segment].workQueue <- work{id: "HP2B", argument: m}
-	} else if m.Epoch > int(iss.currentEpoch) {
-		iss.bufferChan <- m
-	}
-	//iss.segmentsMutex.RUnlock()
+	iss.messageChan <- m
+	/*
+		if m.Epoch == int(iss.currentEpoch) {
+			iss.segments[m.Segment].workQueue <- work{id: "HP2B", argument: m}
+		} else if m.Epoch > int(iss.currentEpoch) {
+			iss.bufferChan <- m
+		}
+	*/
 }
 
 // HandleP3 handles phase 3 commit message
 func (iss *ISS) HandleP3(m P3) {
-	//iss.segmentsMutex.RLock()
-	if m.Epoch == int(iss.currentEpoch) {
-		iss.segments[m.Segment].workQueue <- work{id: "HP3", argument: m}
-	} else if m.Epoch > int(iss.currentEpoch) {
-		iss.bufferChan <- m
-	}
-	//iss.segmentsMutex.RUnlock()
+	iss.messageChan <- m
+	/*
+		if m.Epoch == int(iss.currentEpoch) {
+			iss.segments[m.Segment].workQueue <- work{id: "HP3", argument: m}
+		} else if m.Epoch > int(iss.currentEpoch) {
+			iss.bufferChan <- m
+		}
+	*/
 }
 
 func (iss *ISS) exec() {
