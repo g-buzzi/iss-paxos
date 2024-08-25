@@ -9,13 +9,11 @@ if [ -z "${PID}" ]; then
     go build ../server/
     go build ../client/
     go build ../cmd/
-    ./server -log_dir=. -log_level=debug -id 1.1 -algorithm=wpaxos -heartbeat=100 -batch=0 &
+    ./server -log_dir=. -log_level=debug -id 1.1 -algorithm=iss -heartbeat=500 -batch=0 -segments=3 -segSize=32 -config=config_3.json &
     echo $! >> ${PID_FILE}
-    ./server -log_dir=. -log_level=debug -id 1.2 -algorithm=wpaxos -heartbeat=100 -batch=0 &
+    ./server -log_dir=. -log_level=debug -id 1.2 -algorithm=iss -heartbeat=500 -batch=0 -segments=3 -segSize=32 -config=config_3.json &
    echo $! >> ${PID_FILE}
-    ./server -log_dir=. -log_level=debug -id 1.3 -algorithm=wpaxos -heartbeat=100 -batch=0 &
-    echo $! >> ${PID_FILE}
-    ./server -log_dir=. -log_level=debug -id 1.4 -algorithm=wpaxos -heartbeat=100 -batch=0 &
+    ./server -log_dir=. -log_level=debug -id 1.3 -algorithm=iss -heartbeat=500 -batch=0 -segments=3 -segSize=32 -config=config_3.json &
     echo $! >> ${PID_FILE}
 else
     echo "Servers are already started in this folder."
