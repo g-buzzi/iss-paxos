@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/ailidani/paxi"
-	"github.com/ailidani/paxi/log"
 )
 
 var logRetention = 5
@@ -199,12 +198,12 @@ func (iss *ISS) bufferManager() {
 			n := iss.epochBuffer.len()
 			for i := 0; i < n; i++ {
 				message := iss.epochBuffer.pop()
-				log.Debugf("Got %v", message)
-				log.Debugf("Stack state %v", iss.epochBuffer.stack)
+				//log.Debugf("Got %v", message)
+				//log.Debugf("Stack state %v", iss.epochBuffer.stack)
 				internal := message.(InternalMessage)
 				epoch := int(atomic.LoadInt64(&iss.currentEpoch))
 				if internal.epoch() == epoch {
-					log.Debugf("Retrieving message from epoch buffer %v", message)
+					//log.Debugf("Retrieving message from epoch buffer %v", message)
 					iss.messageChan <- message
 					/*
 						switch fmt.Sprintf("%T", message) {
@@ -306,7 +305,7 @@ func (iss *ISS) exec() {
 		iss.log[slot] = &update.entry
 		e, exist := iss.log[iss.execute]
 		for exist && e.commit {
-			log.Debugf("Executed %v", iss.execute)
+			//log.Debugf("Executed %v", iss.execute)
 			value := iss.Execute(e.command)
 			if e.request != nil {
 				reply := paxi.Reply{

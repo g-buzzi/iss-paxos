@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/ailidani/paxi"
-	"github.com/ailidani/paxi/log"
 )
 
 type work struct {
@@ -78,7 +77,7 @@ func (p *ISSPaxos) worker() {
 	keepWorker := true
 	for keepWorker {
 		job := <-p.workQueue
-		log.Debugf("Executing %v s=%v", job.id, p.segment)
+		//log.Debugf("Executing %v s=%v", job.id, p.segment)
 		switch job.id {
 		case "P1A":
 			p.P1a()
@@ -101,7 +100,7 @@ func (p *ISSPaxos) worker() {
 		case "End":
 			keepWorker = false
 		default:
-			log.Debugf("No known handler for message!!!!!!!!!!!")
+			//log.Debugf("No known handler for message!!!!!!!!!!!")
 		}
 	}
 	p.sendHeartbeat(-1)
@@ -202,9 +201,9 @@ func (p *ISSPaxos) HandleP1a(m P1a) {
 
 // HandleP1b handles P1b message
 func (p *ISSPaxos) HandleP1b(m P1b) {
-	log.Debugf("Updating Log")
+	//log.Debugf("Updating Log")
 	p.update(m.Log)
-	log.Debugf("Got past")
+	//log.Debugf("Got past")
 	// old message
 	if m.Ballot < p.ballot || p.active {
 		return
@@ -217,19 +216,19 @@ func (p *ISSPaxos) HandleP1b(m P1b) {
 
 	// ack message
 	if m.Ballot.ID() == p.iss.ID() && m.Ballot == p.ballot {
-		log.Debugf("Trying Ack")
+		//log.Debugf("Trying Ack")
 		p.quorum.ACK(m.ID)
 		if p.Q1(p.quorum) {
-			log.Debugf("Got Quorum")
+			//log.Debugf("Got Quorum")
 			p.active = true
 			for s := 0; s <= p.slot; s++ {
-				log.Debugf("Seeing if has to resend slot %v of segment %v, with slot=%v", s, p.segment, p.log[s])
+				//log.Debugf("Seeing if has to resend slot %v of segment %v, with slot=%v", s, p.segment, p.log[s])
 				if p.log[s] == nil || p.log[s].commit || s >= segmentSize {
-					log.Debugf("Not resending slot %v of segment %v", s, p.segment)
+					//log.Debugf("Not resending slot %v of segment %v", s, p.segment)
 					//log.Debugf("Skipping log for %v after steal of segment %v in epoch %v", s, p.segment, p.epoch)
 					continue
 				}
-				log.Debugf("Decided to resend slot %v of segment %v", s, p.segment)
+				//log.Debugf("Decided to resend slot %v of segment %v", s, p.segment)
 				p.log[s].ballot = p.ballot
 				p.log[s].quorum = paxi.NewQuorum()
 				p.log[s].quorum.ACK(p.iss.ID())

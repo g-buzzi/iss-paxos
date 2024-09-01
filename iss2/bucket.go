@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	"github.com/ailidani/paxi"
-	"github.com/ailidani/paxi/log"
 )
 
 type BucketItem struct {
@@ -44,7 +43,7 @@ func (b *Bucket) Add(req *paxi.Request) {
 
 	bucketItem := BucketItem{request: req}
 	b.Lock()
-	log.Debugf("Added request: %v to bucket", RequestID(req))
+	//log.Debugf("Added request: %v to bucket", RequestID(req))
 	_, exists := b.reqIndex[RequestID(req)]
 	if exists {
 		b.mutex.Unlock()
@@ -109,7 +108,7 @@ func (b *Bucket) Get() *paxi.Request { //needs to be called while locked
 		b.firstReq = next
 		b.NumRequests -= 1
 	}
-	log.Debugf("Removed request: %v to bucket", RequestID(bucketItem.request))
+	//log.Debugf("Removed request: %v to bucket", RequestID(bucketItem.request))
 	return bucketItem.request
 }
 
