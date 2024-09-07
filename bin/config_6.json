@@ -28,7 +28,7 @@
         "W": 0.5,
         "Throttle": 1200,
         "Concurrency": 2048,
-        "Distribution": "uniform",
+        "Distribution": "normal",
         "LinearizabilityCheck": true,
         "Conflicts": 0,
         "Min": 0,
