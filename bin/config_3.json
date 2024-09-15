@@ -19,7 +19,7 @@
         "T": 180,
         "N": 0,
         "K": 120000,
-        "W": 0.5,
+        "W": 0,
         "Throttle": 1200,
         "Concurrency": 2048,
         "Distribution": "normal",
