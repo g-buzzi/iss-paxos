@@ -61,7 +61,7 @@ func NewISS(n paxi.Node, options ...func(*ISS)) *ISS {
 		bufferChan:     make(chan interface{}, segmentSize*numSegments),
 		epochChan:      make(chan int),
 		messageChan:    make(chan interface{}, paxi.GetConfig().BufferSize),
-		retrieveBuffer: make(chan bool, 10),
+		retrieveBuffer: make(chan bool, paxi.GetConfig().ChanBufferSize),
 		epochEnd:       make(chan bool),
 	}
 

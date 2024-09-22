@@ -44,8 +44,8 @@ func NewISSPaxos(iss *ISS, leader paxi.ID, bucketGroup *BucketGroup, epoch int64
 		segment:         segment,
 		epoch:           int(epoch),
 		slot:            -1,
-		heartbeat:       make(chan int, 1), //FIXME:size of this shouldn't matter
-		workQueue:       make(chan work, 200),
+		heartbeat:       make(chan int, 1),
+		workQueue:       make(chan work, paxi.GetConfig().ChanBufferSize),
 		log:             make(map[int]*entry, segmentSize),
 		quorum:          paxi.NewQuorum(),
 		Q1:              func(q *paxi.Quorum) bool { return q.Majority() },

@@ -21,7 +21,7 @@
         "K": 12000,
         "W": 0,
         "Throttle": 1200,
-        "Concurrency": 2048,
+        "Concurrency": 1024,
         "Distribution": "normal",
         "LinearizabilityCheck": true,
         "Conflicts": 0,
