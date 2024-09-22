@@ -8,9 +8,10 @@ import (
 )
 
 type BucketItem struct {
-	request  *paxi.Request
-	next     *BucketItem
-	previous *BucketItem
+	request   *paxi.Request
+	next      *BucketItem
+	previous  *BucketItem
+	committed bool
 }
 
 func RequestID(req *paxi.Request) string {
@@ -40,27 +41,25 @@ func NewBucket() *Bucket {
 }
 
 func (b *Bucket) Add(req *paxi.Request) {
+	defer b.Unlock()
 
-	bucketItem := BucketItem{request: req}
+	new := false
 	b.Lock()
-	//log.Debugf("Added request: %v to bucket", RequestID(req))
-	_, exists := b.reqIndex[RequestID(req)]
+	requestId := RequestID(req)
+	existingItem, exists := b.reqIndex[requestId]
 	if exists {
-		b.mutex.Unlock()
-		return
-	}
-	b.reqIndex[RequestID(req)] = &bucketItem
-	if b.NumRequests > 0 {
-		bucketItem.previous = b.lastReq
-		b.lastReq.next = &bucketItem
-		b.lastReq = &bucketItem
+		if !existingItem.committed && existingItem.previous == nil && existingItem.next == nil && existingItem != b.firstReq {
+			b.prepend(existingItem)
+			new = true
+		}
 	} else {
-		b.firstReq = &bucketItem
-		b.lastReq = &bucketItem
+		bucketItem := BucketItem{request: req, committed: false}
+		b.reqIndex[requestId] = &bucketItem
+		b.append(&bucketItem)
+		new = true
 	}
-	b.NumRequests += 1
-	b.Unlock()
-	if b.group != nil {
+
+	if b.group != nil && new {
 		select {
 		case b.group.getTrigger <- true:
 		default:
@@ -68,13 +67,44 @@ func (b *Bucket) Add(req *paxi.Request) {
 	}
 }
 
-func (b *Bucket) Remove(req *paxi.Request) bool {
+// Must be called while locked
+func (b *Bucket) append(bucketItem *BucketItem) {
+	if b.firstReq == nil {
+		b.firstReq = bucketItem
+		b.lastReq = bucketItem
+	} else {
+		bucketItem.previous = b.lastReq
+		b.lastReq.next = bucketItem
+		b.lastReq = bucketItem
+	}
+	b.NumRequests += 1
+}
+
+func (b *Bucket) prepend(bucketItem *BucketItem) {
+	if b.firstReq == nil {
+		b.firstReq = bucketItem
+		b.lastReq = bucketItem
+	} else {
+		bucketItem.next = b.firstReq
+		b.firstReq.previous = bucketItem
+		b.firstReq = bucketItem
+	}
+	b.NumRequests += 1
+}
+
+func (b *Bucket) Commit(req *paxi.Request) bool {
 	b.mutex.Lock()
-	bucketItem, ok := b.reqIndex[RequestID(req)]
+	defer b.Unlock()
+	requestId := RequestID(req)
+	bucketItem, ok := b.reqIndex[requestId]
 	if ok {
-		delete(b.reqIndex, RequestID(req))
+		bucketItem.committed = true
+		if bucketItem.previous == nil && bucketItem.next == nil && bucketItem != b.firstReq { //check if it already was in flight
+			return ok
+		}
 		previous := bucketItem.previous
 		next := bucketItem.next
+
 		if previous != nil && next != nil {
 			previous.next = next
 		} else if previous != nil {
@@ -91,21 +121,27 @@ func (b *Bucket) Remove(req *paxi.Request) bool {
 			b.firstReq = nil
 			b.lastReq = nil
 		}
+
+		bucketItem.previous = nil
+		bucketItem.next = nil
 		b.NumRequests -= 1
+	} else {
+		bucketItem := BucketItem{request: req, committed: true}
+		b.reqIndex[requestId] = &bucketItem
 	}
-	b.mutex.Unlock()
 	return ok
 }
 
 func (b *Bucket) Get() *paxi.Request { //needs to be called while locked
 	bucketItem := b.firstReq
 	if bucketItem != nil {
-		delete(b.reqIndex, RequestID(bucketItem.request))
+		//delete(b.reqIndex, RequestID(bucketItem.request)) (no longer necessary, since clients can send to multiple processess)
 		next := bucketItem.next
 		if next != nil {
 			next.previous = nil
 		}
 		b.firstReq = next
+		bucketItem.next = nil
 		b.NumRequests -= 1
 	}
 	//log.Debugf("Removed request: %v to bucket", RequestID(bucketItem.request))

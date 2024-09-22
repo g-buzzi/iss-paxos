@@ -308,6 +308,7 @@ func (iss *ISS) exec() {
 			//log.Debugf("Executed %v", iss.execute)
 			value := iss.Execute(e.command)
 			if e.request != nil {
+				iss.committ(e.request)
 				reply := paxi.Reply{
 					Command:    e.command,
 					Value:      value,
@@ -326,4 +327,9 @@ func (iss *ISS) exec() {
 			}
 		}
 	}
+}
+
+func (iss *ISS) committ(r *paxi.Request) {
+	hashing := iss.bucketHash(&r.Command.ClientID)
+	iss.buckets[hashing].Commit(r)
 }
