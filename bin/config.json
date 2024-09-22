@@ -12,8 +12,8 @@
     "policy": "majority",
     "threshold": 3,
     "thrifty": false,
-    "chan_buffer_size": 2048,
-    "buffer_size": 2048,
+    "chan_buffer_size": 4096,
+    "buffer_size": 4096,
     "multiversion": false,
     "benchmark": {
         "T": 60,
