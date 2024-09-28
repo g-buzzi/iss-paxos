@@ -27,7 +27,7 @@
         "Conflicts": 0,
         "Min": 0,
         "Mu": 100,
-        "Sigma": 2000,
+        "Sigma": 100,
         "Move": false,
         "Speed": 0,
         "Zipfian_s": 2,
