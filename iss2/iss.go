@@ -153,19 +153,18 @@ func (iss *ISS) createBucketGroup(epoch int, segment int) *BucketGroup {
 }
 
 func (iss *ISS) HandleRequest(r paxi.Request) {
-	hashing := iss.bucketHash(&r.Command.ClientID)
+	hashing := iss.bucketHash(r.Command.CommandID)
 	iss.buckets[hashing].Add(&r)
 }
 
 func (iss *ISS) reviveRequest(r paxi.Request) {
-	iss.buckets[iss.bucketHash(&r.Command.ClientID)].Add(&r)
+	iss.buckets[iss.bucketHash(r.Command.CommandID)].Add(&r)
 }
 
-func (iss *ISS) bucketHash(nodeID *paxi.ID) int64 {
+func (iss *ISS) bucketHash(commandID int) int {
 	//bucketHash := (int64(command.ClientID.Node()) >> 32) + int64(command.ClientID.Zone())
-	bucketHash := int64(nodeID.Node())
 	//log.Debugf("Hashing clientID: %v as number %v", nodeID, bucketHash)
-	return bucketHash % int64(numBuckets)
+	return commandID % numBuckets
 }
 
 func (iss *ISS) bufferManager() {
@@ -330,6 +329,6 @@ func (iss *ISS) exec() {
 }
 
 func (iss *ISS) committ(r *paxi.Request) {
-	hashing := iss.bucketHash(&r.Command.ClientID)
+	hashing := iss.bucketHash(r.Command.CommandID)
 	iss.buckets[hashing].Commit(r)
 }
