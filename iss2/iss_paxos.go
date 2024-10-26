@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/ailidani/paxi"
+	"github.com/ailidani/paxi/log"
 )
 
 type work struct {
@@ -265,23 +266,33 @@ func (p *ISSPaxos) P2a(r *paxi.Request) {
 	p.sendHeartbeat(0)
 
 	var command paxi.Command
-	if r != nil {
+	if r != nil { //Sending actual command
 		command = r.Command
-	} else {
+		p.log[s] = &entry{
+			ballot:    p.ballot,
+			command:   command,
+			request:   r,
+			quorum:    paxi.NewQuorum(),
+			timestamp: time.Now(),
+		}
+		p.log[s].quorum.ACK(p.iss.ID())
+	} else { //Sending a skip message, wich is automatically commited, as per restrictions (Mencius)
+		log.Debugf("Segment %d sending a SKIP on slot %d", p.segment, s)
 		command = paxi.Command{Key: 0, Value: nil, ClientID: "", CommandID: 0}
-	}
-
-	p.log[s] = &entry{
-		ballot:    p.ballot,
-		command:   command,
-		request:   r,
-		quorum:    paxi.NewQuorum(),
-		timestamp: time.Now(),
+		p.log[s] = &entry{
+			ballot:    p.ballot,
+			command:   command,
+			request:   r,
+			quorum:    paxi.NewQuorum(),
+			timestamp: time.Now(),
+			commit:    true,
+		}
+		p.iss.logChan <- logUpdate{entry: *p.log[s],
+			slot: (p.epoch * epochSize) + (s * numSegments) + p.segment}
 	}
 
 	//log.Debugf("Log: %v", p.iss.log[s])
 
-	p.log[s].quorum.ACK(p.iss.ID())
 	m := P2a{
 		Ballot:  p.ballot,
 		Slot:    s,
@@ -332,15 +343,11 @@ func (p *ISSPaxos) HandleP2a(m P2a) {
 		p.sendHeartbeat(0)
 		p.ballot = m.Ballot
 		p.active = false
-		// update slot number
-		// FIXME
-		//log.Debugf("Calculating slot for p.slot = {%v} and m.Slot = {%v} for segment {%v} of epoch {%v}", p.slot, m.Slot, p.segment, p.epoch)
 		internalSlot := paxi.Max(p.slot, 0)
 		if p.slot >= segmentSize {
 			internalSlot = segmentSize - 1
 		}
 		p.slot = paxi.Max(internalSlot, m.Slot)
-		//log.Debugf("It decided on {%v}", p.slot)
 
 		// update entry
 		if e, exists := p.log[m.Slot]; exists {
@@ -364,13 +371,20 @@ func (p *ISSPaxos) HandleP2a(m P2a) {
 		}
 	}
 
-	p.iss.Send(m.Ballot.ID(), P2b{
-		Ballot:  p.ballot,
-		Slot:    m.Slot,
-		Epoch:   p.epoch,
-		Segment: p.segment,
-		ID:      p.iss.ID(),
-	})
+	if p.log[m.Slot].command.Empty() {
+		log.Debugf("Segment %d acknowledges a SKIP on slot %d", p.segment, m.Slot)
+		p.log[m.Slot].commit = true
+		p.iss.logChan <- logUpdate{entry: *p.log[m.Slot],
+			slot: (p.epoch * epochSize) + (m.Slot * numSegments) + p.segment}
+	} else {
+		p.iss.Send(m.Ballot.ID(), P2b{
+			Ballot:  p.ballot,
+			Slot:    m.Slot,
+			Epoch:   p.epoch,
+			Segment: p.segment,
+			ID:      p.iss.ID(),
+		})
+	}
 }
 
 // HandleP2b handles P2b message
@@ -424,22 +438,13 @@ func (p *ISSPaxos) HandleP2b(m P2b) {
 
 // HandleP3 handles phase 3 commit message
 func (p *ISSPaxos) HandleP3(m P3) {
-	// //log.Debugf("Replica %s ===[%v]===>>> Replica %s\n", m.Ballot.ID(), m, p.ID())
 	p.sendHeartbeat(0)
-	// FIXME
-	//log.Debugf("Calculating slot for p.slot = {%v} and m.Slot = {%v} for segment {%v} of epoch {%v}", p.slot, m.Slot, p.segment, p.epoch)
+
 	internalSlot := paxi.Max(p.slot, 0)
 	if p.slot > segmentSize {
 		internalSlot = segmentSize - 1
 	}
 	p.slot = paxi.Max(internalSlot, m.Slot)
-	//log.Debugf("It decided on = {%v}", p.slot)
-	//internalSlot := paxi.Max(p.slot, 0)
-	//if p.slot > segmentSize {
-	//	internalSlot = segmentSize - 1
-	//}
-	//s := p.slotNumbers[internalSlot]
-	//p.slot = paxi.Max(m.Slot, s) / segmentSize //Value gets floored as its a division between ints
 	e, exist := p.log[m.Slot]
 	if exist { //FIXME
 		if !e.command.Equal(m.Command) && e.request != nil {
