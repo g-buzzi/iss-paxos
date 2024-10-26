@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/ailidani/paxi"
-	"github.com/ailidani/paxi/log"
 )
 
 type work struct {
@@ -277,7 +276,6 @@ func (p *ISSPaxos) P2a(r *paxi.Request) {
 		}
 		p.log[s].quorum.ACK(p.iss.ID())
 	} else { //Sending a skip message, wich is automatically commited, as per restrictions (Mencius)
-		log.Debugf("Segment %d sending a SKIP on slot %d", p.segment, s)
 		command = paxi.Command{Key: 0, Value: nil, ClientID: "", CommandID: 0}
 		p.log[s] = &entry{
 			ballot:    p.ballot,
@@ -372,7 +370,6 @@ func (p *ISSPaxos) HandleP2a(m P2a) {
 	}
 
 	if p.log[m.Slot].command.Empty() {
-		log.Debugf("Segment %d acknowledges a SKIP on slot %d", p.segment, m.Slot)
 		p.log[m.Slot].commit = true
 		p.iss.logChan <- logUpdate{entry: *p.log[m.Slot],
 			slot: (p.epoch * epochSize) + (m.Slot * numSegments) + p.segment}
