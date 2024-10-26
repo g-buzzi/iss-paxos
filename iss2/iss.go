@@ -129,10 +129,6 @@ func (iss *ISS) startEpoch(epoch int) {
 	atomic.StoreInt64(&iss.currentEpoch, int64(epoch))
 
 	iss.retrieveBuffer <- true
-
-	for i := (epoch - logRetention) * epochSize; i < (epoch-logRetention+1)*epochSize; i++ {
-		delete(iss.log, i)
-	}
 }
 
 func (iss *ISS) selectLeader(epoch int) []paxi.ID {
@@ -304,7 +300,7 @@ func (iss *ISS) exec() {
 		iss.log[slot] = &update.entry
 		e, exist := iss.log[iss.execute]
 		for exist && e.commit {
-			//log.Debugf("Executed %v", iss.execute)
+			delete(iss.log, iss.execute-(epochSize*logRetention))
 			value := iss.Execute(e.command)
 			if e.request != nil {
 				iss.commit(e.request)

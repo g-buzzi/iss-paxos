@@ -367,21 +367,22 @@ func (p *ISSPaxos) HandleP2a(m P2a) {
 			}
 			//log.Debugf("Log: %v", p.iss.log[m.Slot])
 		}
+		// Check if it's a SKIP
+		if p.log[m.Slot].command.Empty() {
+			p.log[m.Slot].commit = true
+			p.iss.logChan <- logUpdate{entry: *p.log[m.Slot],
+				slot: (p.epoch * epochSize) + (m.Slot * numSegments) + p.segment}
+			return
+		}
 	}
 
-	if p.log[m.Slot].command.Empty() {
-		p.log[m.Slot].commit = true
-		p.iss.logChan <- logUpdate{entry: *p.log[m.Slot],
-			slot: (p.epoch * epochSize) + (m.Slot * numSegments) + p.segment}
-	} else {
-		p.iss.Send(m.Ballot.ID(), P2b{
-			Ballot:  p.ballot,
-			Slot:    m.Slot,
-			Epoch:   p.epoch,
-			Segment: p.segment,
-			ID:      p.iss.ID(),
-		})
-	}
+	p.iss.Send(m.Ballot.ID(), P2b{
+		Ballot:  p.ballot,
+		Slot:    m.Slot,
+		Epoch:   p.epoch,
+		Segment: p.segment,
+		ID:      p.iss.ID(),
+	})
 }
 
 // HandleP2b handles P2b message
