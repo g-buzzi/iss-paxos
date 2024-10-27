@@ -48,8 +48,8 @@ func NewISSPaxos(iss *ISS, leader paxi.ID, bucketGroup *BucketGroup, epoch int64
 		workQueue:       make(chan work, paxi.GetConfig().ChanBufferSize),
 		log:             make(map[int]*entry, segmentSize),
 		quorum:          paxi.NewQuorum(),
-		Q1:              func(q *paxi.Quorum) bool { return q.GridRow() },    // Change this to make it Flexible/Standard
-		Q2:              func(q *paxi.Quorum) bool { return q.GridColumn() }, // Change this to make it Flexible/Standard
+		Q1:              func(q *paxi.Quorum) bool { return q.Majority() }, // Change this to make it Flexible/Standard
+		Q2:              func(q *paxi.Quorum) bool { return q.Majority() }, // Change this to make it Flexible/Standard
 		ReplyWhenCommit: false,
 	}
 	//log.Debugf("Created node for segment %v of epoch %v, starter leader: %v", segment, epoch, p.starterLeader)
